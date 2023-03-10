@@ -1,15 +1,19 @@
 import sys
 import os
 import cv2
-from PySide6.QtGui import QImage, QPixmap, QAction
-from PySide6.QtCore import Qt, QPoint, QRect
-from PySide6.QtWidgets import QApplication, QLabel, QRubberBand, QMainWindow, QFileDialog, QMenu
+from PySide6.QtGui import QImage, QPixmap, QAction, QIcon
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QFileDialog
+
+from Toolbar import FilterToolBar
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.image_files = []
         self.current_image = None
+        self.current_index = 0
 
         # Cria uma janela principal com um rótulo para exibir a imagem
         self.setWindowTitle('JairView')
@@ -20,15 +24,13 @@ class MainWindow(QMainWindow):
         self.dimensionLabel = QLabel()
         self.statusBar.addPermanentWidget(self.dimensionLabel)
 
-        # Conecta sinais de teclas de seta ao método de navegação de imagem
-        self.keyPressEvent = self.navigate_image
-
         # Cria o MenuBar
         self._createMenuBar()
-        self.crop_rect = QRect()
-        self.mouse_pos = QPoint()
 
-        self.rubber_band = QRubberBand(QRubberBand.Rectangle, self.label)
+        # Cria Toolbar Lateral
+        self.filter_toolbar = FilterToolBar(self)
+        self.addToolBar(Qt.LeftToolBarArea, self.filter_toolbar)
+        self.filter_toolbar.setVisible(False)
 
     def _createMenuBar(self):
         menuBar = self.menuBar()
@@ -53,22 +55,8 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-        # Crop Button
-        crop_action = QAction('Crop', self)
-        crop_action.triggered.connect(self.start_cropping)
-
         # Add menus to menu bar
         menuBar.addMenu(file_menu)
-        menuBar.addAction(crop_action)
-
-    def start_cropping(self):
-        img_area = self.label.pixmap().rect()
-        img_area.moveCenter(self.label.rect().center())
-        self.rubber_band.setGeometry(img_area)
-        self.rubber_band.setStyleSheet(
-            "border: 3px solid black; background-color: rgba(0,0,0,0)")
-
-        self.rubber_band.show()
 
     def open_directory(self):
         # Abre um diálogo para selecionar um diretório
@@ -85,7 +73,8 @@ class MainWindow(QMainWindow):
                 self.current_index = -1
             else:
                 self.current_index = 0
-                self.show_image(self.current_index)
+                self.show_image()
+        self.enable_toolbar()
 
     def open_image(self):
         # Abre um diálogo para selecionar uma imagem
@@ -96,20 +85,18 @@ class MainWindow(QMainWindow):
         if file_name:
             self.image_files = [file_name]
             self.current_index = 0
-            self.show_image(self.current_index)
+            self.show_image()
+            self.enable_toolbar()
 
-    def update_rubberband(self):
-        img_area = self.label.pixmap().rect()
-        img_area.moveCenter(self.label.rect().center())
-        self.rubber_band.setGeometry(img_area)
-
-    def show_image(self, index):
+    def show_image(self):
         # Exibe a imagem na posição especificada na lista de imagens
-        if index < 0:
-            index = 0
-        elif index >= len(self.image_files):
-            index = len(self.image_files) - 1
-        self.current_index = index
+
+        if self.current_index == -1:
+            self.label.setText('Nenhuma imagem encontrada.')
+            return
+        elif self.current_index >= len(self.image_files):
+            self.current_index = len(self.image_files) - 1
+
         image_file = self.image_files[self.current_index]
         self.current_image = cv2.imread(image_file, cv2.IMREAD_COLOR)
 
@@ -127,23 +114,22 @@ class MainWindow(QMainWindow):
             self.pixmap = QPixmap.fromImage(qimage)
             self.label.setPixmap(self.pixmap)
 
-            self.update_rubberband()
+            if self.filter_toolbar.persist_checkbox.isChecked():
+                self.filter_toolbar.apply_hsv_filter()
+            else:
+                self.filter_toolbar.reset_sliders()
 
             # Centraliza a imagem na interface
             self.label.setAlignment(Qt.AlignCenter)
-            self.setWindowTitle(f'JairView - {os.path.basename(image_file)}')
+            self.setWindowTitle(
+                f'JairView - {os.path.basename(image_file)} = [{self.current_index + 1}/{len(self.image_files)}]')
 
             self.dimensionLabel.setText(
                 f'Width: {img_width}, Height: {img_height}, Channels: {img_dim}')
+            self.filter_toolbar.update_buttons()
 
-    def navigate_image(self, event):
-        # Navega para a imagem anterior ou próxima ao pressionar as setas do teclado
-        self.rubber_band.destroy()
-
-        if event.key() == Qt.Key_Left:
-            self.show_image(self.current_index - 1)
-        elif event.key() == Qt.Key_Right:
-            self.show_image(self.current_index + 1)
+    def enable_toolbar(self):
+        self.filter_toolbar.setVisible(True)
 
 
 if __name__ == '__main__':
